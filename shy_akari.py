@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-Face detection sample
-Created on 2022/04/16
-Based on depthai-experiments
-https://github.com/luxonis/depthai-experiments/tree/master/gen2-face-detection
-"""
-
-import argparse
-import os
 import threading
 import time
 from queue import Queue
@@ -19,11 +10,8 @@ import cv2
 import depthai as dai
 import numpy as np
 from akari_client import AkariClient
-import signal
-from pathlib import Path
 
 import blobconverter
-from math import cos, sin
 
 pan_target_angle = 0.0
 tilt_target_angle = 0.0
@@ -174,13 +162,6 @@ class FaceTracker:
 
         # Initialize motor position
         self.joints.move_joint_positions(sync=True, pan=0, tilt=0.26)
-        # while True:
-        #     if (
-        #         abs(self.joints.get_joint_positions()["pan"] - self._default_x) <= 0.087
-        #         and abs(self.joints.get_joint_positions()["tilt"] - self._default_y)
-        #         <= 0.087
-        #     ):
-        #         break
         self.currentMotorAngle = self.joints.get_joint_positions()
 
         # Dynamixel Input Value
@@ -564,6 +545,7 @@ def main() -> None:
     t1.join()
     t2.join()
     t3.join()
+
 
 if __name__ == "__main__":
     main()
