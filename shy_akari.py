@@ -177,20 +177,20 @@ class FaceTracker:
 
             # 目があっていたときの処理
             if eyes_meet_check:
-                self.joints.set_joint_velocities(pan=15, tilt=15)
+                self.joints.set_joint_velocities(pan=30, tilt=30)
                 self.currentMotorAngle = self.joints.get_joint_positions()
                 self.joints.move_joint_positions(
                     sync=True,
                     pan=1.0 * -(np.sign(pan_target_angle)),
-                    tilt=tilt_target_angle
+                    tilt=-tilt_target_angle
                 )
                 current_time = time.time()
                 while True:
-                    if (time.time() - current_time) > 1:
+                    if (time.time() - current_time) > 2:
                         break
 
                 # ゆっくりもとの座標に戻る
-                self.joints.set_joint_velocities(pan=5, tilt=5)
+                self.joints.set_joint_velocities(pan=2, tilt=1)
                 self.joints.move_joint_positions(
                     sync=True,
                     pan=self.currentMotorAngle["pan"],
@@ -200,6 +200,7 @@ class FaceTracker:
                 # 復帰中に顔を検出した場合に備えて、直前で変数上書き
                 pan_target_angle = self.currentMotorAngle['pan']
                 tilt_target_angle = self.currentMotorAngle['tilt']
+                eyes_meet_check = False
 
             self.joints.move_joint_positions(
                 pan=pan_target_angle, tilt=tilt_target_angle
