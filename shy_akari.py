@@ -186,7 +186,7 @@ class FaceTracker:
                 )
                 current_time = time.time()
                 while True:
-                    if (time.time() - current_time) > 1:
+                    if (time.time() - current_time) > 2:
                         break
 
                 # ゆっくりもとの座標に戻る
