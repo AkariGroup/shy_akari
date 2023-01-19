@@ -190,7 +190,7 @@ class FaceTracker:
                         break
 
                 # ゆっくりもとの座標に戻る
-                self.joints.set_joint_velocities(pan=3, tilt=3)
+                self.joints.set_joint_velocities(pan=2, tilt=1)
                 self.joints.move_joint_positions(
                     sync=True,
                     pan=self.currentMotorAngle["pan"],
