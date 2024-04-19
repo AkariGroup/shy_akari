@@ -24,6 +24,8 @@ VIDEO_WIDTH, VIDEO_HEIGHT = 300, 300
 debug = True    # とりあえず
 camera = True   # とりあえず
 
+openvino_version = '2021.4'
+detections = None
 
 def frame_norm(frame, bbox):
     norm_vals = np.full(len(bbox), frame.shape[0])
@@ -68,6 +70,7 @@ def padded_point(point, padding, frame_shape=None):
 def create_pipeline():
     print("Creating pipeline...")
     pipeline = dai.Pipeline()
+    pipeline.setOpenVINOVersion(version=dai.OpenVINO.Version.VERSION_2021_4)
 
     if camera:
         print("Creating Color Camera...")
@@ -84,7 +87,7 @@ def create_pipeline():
     # NeuralNetwork
     print("Creating Face Detection Neural Network...")
     face_nn = pipeline.create(dai.node.NeuralNetwork)
-    face_nn.setBlobPath(blobconverter.from_zoo(name="face-detection-retail-0004", shaves=4))
+    face_nn.setBlobPath(blobconverter.from_zoo(name="face-detection-retail-0004", version=openvino_version, shaves=4))
 
     if camera:
         cam.preview.link(face_nn.input)
@@ -100,7 +103,7 @@ def create_pipeline():
     # NeuralNetwork
     print("Creating Landmarks Detection Neural Network...")
     land_nn = pipeline.create(dai.node.NeuralNetwork)
-    land_nn.setBlobPath(blobconverter.from_zoo(name="landmarks-regression-retail-0009", shaves=4))
+    land_nn.setBlobPath(blobconverter.from_zoo(name="landmarks-regression-retail-0009", version=openvino_version, shaves=4))
     land_nn_xin = pipeline.create(dai.node.XLinkIn)
     land_nn_xin.setStreamName("landmark_in")
     land_nn_xin.out.link(land_nn.input)
@@ -111,7 +114,7 @@ def create_pipeline():
     # NeuralNetwork
     print("Creating Head Pose Neural Network...")
     pose_nn = pipeline.create(dai.node.NeuralNetwork)
-    pose_nn.setBlobPath(blobconverter.from_zoo(name="head-pose-estimation-adas-0001", shaves=4))
+    pose_nn.setBlobPath(blobconverter.from_zoo(name="head-pose-estimation-adas-0001", version=openvino_version, shaves=4))
     pose_nn_xin = pipeline.create(dai.node.XLinkIn)
     pose_nn_xin.setStreamName("pose_in")
     pose_nn_xin.out.link(pose_nn.input)
@@ -125,6 +128,7 @@ def create_pipeline():
     path = blobconverter.from_zoo(
         "gaze-estimation-adas-0002",
         shaves=4,
+        version=openvino_version,
         compile_params=['-iop head_pose_angles:FP16,right_eye_image:U8,left_eye_image:U8'],
     )
     gaze_nn.setBlobPath(path)
@@ -177,11 +181,11 @@ class FaceTracker:
 
             # 目があっていたときの処理
             if eyes_meet_check:
-                self.joints.set_joint_velocities(pan=30, tilt=30)
+                self.joints.set_joint_velocities(pan=15, tilt=15)
                 self.currentMotorAngle = self.joints.get_joint_positions()
                 self.joints.move_joint_positions(
                     sync=True,
-                    pan=1.0 * -(np.sign(pan_target_angle)),
+                    pan=0.6 * -(np.sign(pan_target_angle)),
                     tilt=-tilt_target_angle
                 )
                 current_time = time.time()
@@ -257,18 +261,22 @@ class DirectionUpdater:
             self._tilt_p_gain = self._MIN_TILT_GAIN
 
     def _face_info_cb(self, q_detection: Any) -> None:
+        global detections
         while True:
-            detections, eyes_meet = q_detection.get()
-            print("detection:{} meet:{}".format(detections, eyes_meet))
-
-            face_x, face_y, face_width, face_height = detections
-
-            self._set_goal_pos(
-                face_x + face_width / 2,
-                face_y + face_height / 2,
-                eyes_meet,
-            )
-            self._calc_p_gain(face_width)
+            try:
+                detections, eyes_meet = q_detection.get(timeout=0.1)
+                if detections is not None:
+                    face_x, face_y, face_width, face_height = detections
+                    self._set_goal_pos(
+                        face_x + face_width / 2,
+                        face_y + face_height / 2,
+                        eyes_meet,
+                    )
+                    self._calc_p_gain(face_width)
+                print("detection:{} meet:{}".format(detections, eyes_meet))
+            except:
+                detections = None
+                pass
 
     def _set_goal_pos(self, face_x: float, face_y: float, eyes_meet: bool) -> None:
         global pan_target_angle
@@ -472,10 +480,10 @@ class GazeRecognition:
 
                 x, y = (self.gaze * 100).astype(int)[:2]
 
-                if self.bboxes is not None:
+                if self.bboxes is not None and detections is not None:
                     face_reco = True
-                    # cv2.arrowedLine(self.debug_frame, (le_x, le_y), (le_x + x, le_y - y), (255, 0, 255), 3)
-                    # cv2.arrowedLine(self.debug_frame, (re_x, re_y), (re_x + x, re_y - y), (255, 0, 255), 3)
+                    cv2.arrowedLine(self.debug_frame, (le_x, le_y), (le_x + x, le_y - y), (255, 0, 255), 3)
+                    cv2.arrowedLine(self.debug_frame, (re_x, re_y), (re_x + x, re_y - y), (255, 0, 255), 3)
                 else:
                     face_reco = False
 
