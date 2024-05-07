@@ -16,16 +16,12 @@ import blobconverter
 pan_target_angle = 0.0
 tilt_target_angle = 0.0
 eyes_meet_check = False
+detections = None
 
-# resize input to smaller size for faster inference
 NN_WIDTH, NN_HEIGHT = 160, 120
 VIDEO_WIDTH, VIDEO_HEIGHT = 300, 300
+OPENVINO_VERSION = '2021.4'
 
-debug = True    # とりあえず
-camera = True   # とりあえず
-
-openvino_version = '2021.4'
-detections = None
 
 def frame_norm(frame, bbox):
     norm_vals = np.full(len(bbox), frame.shape[0])
@@ -72,38 +68,30 @@ def create_pipeline():
     pipeline = dai.Pipeline()
     pipeline.setOpenVINOVersion(version=dai.OpenVINO.Version.VERSION_2021_4)
 
-    if camera:
-        print("Creating Color Camera...")
-        cam = pipeline.create(dai.node.ColorCamera)
-        cam.setPreviewSize(300, 300)
-        cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-        cam.setInterleaved(False)
-        cam.setBoardSocket(dai.CameraBoardSocket.RGB)
+    print("Creating Color Camera...")
+    cam = pipeline.create(dai.node.ColorCamera)
+    cam.setPreviewSize(300, 300)
+    cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+    cam.setInterleaved(False)
+    cam.setBoardSocket(dai.CameraBoardSocket.RGB)
 
-        cam_xout = pipeline.create(dai.node.XLinkOut)
-        cam_xout.setStreamName("cam_out")
-        cam.preview.link(cam_xout.input)
+    cam_xout = pipeline.create(dai.node.XLinkOut)
+    cam_xout.setStreamName("cam_out")
+    cam.preview.link(cam_xout.input)
 
-    # NeuralNetwork
     print("Creating Face Detection Neural Network...")
     face_nn = pipeline.create(dai.node.NeuralNetwork)
-    face_nn.setBlobPath(blobconverter.from_zoo(name="face-detection-retail-0004", version=openvino_version, shaves=4))
+    face_nn.setBlobPath(blobconverter.from_zoo(name="face-detection-retail-0004", version=OPENVINO_VERSION, shaves=4))
 
-    if camera:
-        cam.preview.link(face_nn.input)
-    else:
-        face_in = pipeline.create(dai.node.XLinkIn)
-        face_in.setStreamName("face_in")
-        face_in.out.link(face_nn.input)
+    cam.preview.link(face_nn.input)
 
     face_nn_xout = pipeline.create(dai.node.XLinkOut)
     face_nn_xout.setStreamName("face_nn")
     face_nn.out.link(face_nn_xout.input)
 
-    # NeuralNetwork
     print("Creating Landmarks Detection Neural Network...")
     land_nn = pipeline.create(dai.node.NeuralNetwork)
-    land_nn.setBlobPath(blobconverter.from_zoo(name="landmarks-regression-retail-0009", version=openvino_version, shaves=4))
+    land_nn.setBlobPath(blobconverter.from_zoo(name="landmarks-regression-retail-0009", version=OPENVINO_VERSION, shaves=4))
     land_nn_xin = pipeline.create(dai.node.XLinkIn)
     land_nn_xin.setStreamName("landmark_in")
     land_nn_xin.out.link(land_nn.input)
@@ -111,10 +99,9 @@ def create_pipeline():
     land_nn_xout.setStreamName("landmark_nn")
     land_nn.out.link(land_nn_xout.input)
 
-    # NeuralNetwork
     print("Creating Head Pose Neural Network...")
     pose_nn = pipeline.create(dai.node.NeuralNetwork)
-    pose_nn.setBlobPath(blobconverter.from_zoo(name="head-pose-estimation-adas-0001", version=openvino_version, shaves=4))
+    pose_nn.setBlobPath(blobconverter.from_zoo(name="head-pose-estimation-adas-0001", version=OPENVINO_VERSION, shaves=4))
     pose_nn_xin = pipeline.create(dai.node.XLinkIn)
     pose_nn_xin.setStreamName("pose_in")
     pose_nn_xin.out.link(pose_nn.input)
@@ -122,13 +109,12 @@ def create_pipeline():
     pose_nn_xout.setStreamName("pose_nn")
     pose_nn.out.link(pose_nn_xout.input)
 
-    # NeuralNetwork
     print("Creating Gaze Estimation Neural Network...")
     gaze_nn = pipeline.create(dai.node.NeuralNetwork)
     path = blobconverter.from_zoo(
         "gaze-estimation-adas-0002",
         shaves=4,
-        version=openvino_version,
+        version=OPENVINO_VERSION,
         compile_params=['-iop head_pose_angles:FP16,right_eye_image:U8,left_eye_image:U8'],
     )
     gaze_nn.setBlobPath(path)
@@ -142,7 +128,6 @@ def create_pipeline():
     return pipeline
 
 
-# 顔追従するクラス
 class FaceTracker:
     """face tracking class"""
 
@@ -150,13 +135,12 @@ class FaceTracker:
         global pan_target_angle
         global tilt_target_angle
 
-        # AkariClientのインスタンスを作成する。
         self.akari = AkariClient()
-        # 関節制御用のインスタンスを取得する。
         self.joints = self.akari.joints
 
         self._default_x = 0
         self._default_y = 0
+
         # サーボトルクON
         self.joints.enable_all_servo()
         # モータ速度設定
@@ -164,11 +148,10 @@ class FaceTracker:
         # モータ加速度設定
         self.joints.set_joint_accelerations(pan=30, tilt=30)
 
-        # Initialize motor position
+        # モーター初期位置
         self.joints.move_joint_positions(sync=True, pan=0, tilt=0.26)
         self.currentMotorAngle = self.joints.get_joint_positions()
 
-        # Dynamixel Input Value
         pan_target_angle = self.currentMotorAngle["pan"]
         tilt_target_angle = self.currentMotorAngle["tilt"]
 
@@ -179,7 +162,6 @@ class FaceTracker:
         while True:
             self.joints.set_joint_velocities(pan=10, tilt=10)
 
-            # 目があっていたときの処理
             if eyes_meet_check:
                 self.joints.set_joint_velocities(pan=15, tilt=15)
                 self.currentMotorAngle = self.joints.get_joint_positions()
@@ -193,7 +175,6 @@ class FaceTracker:
                     if (time.time() - current_time) > 2:
                         break
 
-                # ゆっくりもとの座標に戻る
                 self.joints.set_joint_velocities(pan=2, tilt=1)
                 self.joints.move_joint_positions(
                     sync=True,
@@ -201,7 +182,6 @@ class FaceTracker:
                     tilt=self.currentMotorAngle["tilt"]
                 )
 
-                # 復帰中に顔を検出した場合に備えて、直前で変数上書き
                 pan_target_angle = self.currentMotorAngle['pan']
                 tilt_target_angle = self.currentMotorAngle['tilt']
                 eyes_meet_check = False
@@ -290,10 +270,10 @@ class DirectionUpdater:
 
         pan_error = -(face_x + self._pan_dev - self._H_PIX_WIDTH / 2.0) / (
             self._H_PIX_WIDTH / 2.0
-        )  # -1 ~ 1
+        )
         tilt_error = -(face_y + self._tilt_dev - self._H_PIX_HEIGHT / 2.0) / (
             self._H_PIX_HEIGHT / 2.0
-        )  # -1 ~ 1
+        )
 
         if abs(pan_error) > self._PAN_THRESHOLD:
             pan_target_angle += self._pan_p_gain * pan_error
@@ -317,10 +297,7 @@ class GazeRecognition:
         self.device = device
         print("Starting pipeline...")
         self.device.startPipeline()
-        if camera:
-            self.cam_out = self.device.getOutputQueue("cam_out")
-        else:
-            self.face_in = self.device.getInputQueue("face_in")
+        self.cam_out = self.device.getOutputQueue("cam_out")
 
         self.frame = None
         self.face_box_q = Queue()
@@ -400,10 +377,6 @@ class GazeRecognition:
             right_img = self.frame[self.right_bbox[1]:self.right_bbox[3], self.right_bbox[0]:self.right_bbox[2]]
 
             try:
-                # The output of  pose_nn is in YPR  format, which is the required sequence input for pose in  gaze
-                # https://docs.openvinotoolkit.org/2020.1/_models_intel_head_pose_estimation_adas_0001_description_head_pose_estimation_adas_0001.html
-                # https://docs.openvinotoolkit.org/latest/omz_models_model_gaze_estimation_adas_0002.html
-                # ... three head pose angles – (yaw, pitch, and roll) ...
                 values = to_tensor_result(pose_nn.get())
                 self.pose = [
                         values['angle_y_fc'][0][0],
@@ -427,25 +400,8 @@ class GazeRecognition:
             except RuntimeError:
                 continue
 
-    def should_run(self):
-        if self.running:
-            return True if camera else self.cap.isOpened()
-        else:
-            return False
-
     def get_frame(self, retries=0):
-        if camera:
-            return True, np.array(self.cam_out.get().getData()).reshape((3, 300, 300)).transpose(1, 2, 0).astype(np.uint8)
-        else:
-            read_correctly, new_frame = self.cap.read()
-            if not read_correctly or new_frame is None:
-                if retries < 5:
-                    return self.get_frame(retries+1)
-                else:
-                    print("Source closed, terminating...")
-                    return False, None
-            else:
-                return read_correctly, new_frame
+        return True, np.array(self.cam_out.get().getData()).reshape((3, 300, 300)).transpose(1, 2, 0).astype(np.uint8)
 
     def run(self, q_detection):
         meet_flag = False
@@ -459,7 +415,7 @@ class GazeRecognition:
         for thread in self.threads:
             thread.start()
 
-        while self.should_run():
+        while True:
             try:
                 read_correctly, new_frame = self.get_frame()
             except RuntimeError:
@@ -471,7 +427,6 @@ class GazeRecognition:
             self.frame = new_frame
             self.debug_frame = self.frame.copy()
 
-            # if debug:  # face
             if self.gaze is not None and self.left_bbox is not None and self.right_bbox is not None:
                 re_x = (self.right_bbox[0] + self.right_bbox[2]) // 2
                 re_y = (self.right_bbox[1] + self.right_bbox[3]) // 2
@@ -487,9 +442,8 @@ class GazeRecognition:
                 else:
                     face_reco = False
 
-                # 目線の矢印の始点と終点の座標値の差がしきい値以下だった場合は目があっているとする
+                # 目線の矢印の始点と終点の座標値の差がしきい値以下だった場合は目があっている
                 if x < 2.0 and y < 2.0 and face_reco:
-                    # print("Eyes meet!!")
                     meet_count = meet_count + 1
                     if meet_count > 3:
                         meet_flag = True
@@ -503,33 +457,16 @@ class GazeRecognition:
                 bbox = frame_norm(self.frame, raw_bbox)
                 cv2.rectangle(self.debug_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (10, 245, 10), 2)
                 q_detection.put((bbox, meet_flag))
-            # if self.nose is not None:
-            #     cv2.circle(self.debug_frame, (self.nose[0], self.nose[1]), 2, (0, 255, 0), thickness=5, lineType=8, shift=0)
-            # if self.left_bbox is not None:
-            #     cv2.rectangle(self.debug_frame, (self.left_bbox[0], self.left_bbox[1]), (self.left_bbox[2], self.left_bbox[3]), (245, 10, 10), 2)
-            # if self.right_bbox is not None:
-            #     cv2.rectangle(self.debug_frame, (self.right_bbox[0], self.right_bbox[1]), (self.right_bbox[2], self.right_bbox[3]), (245, 10, 10), 2)
-            # if self.pose is not None and self.nose is not None:
-            #     draw_3d_axis(self.debug_frame, self.pose, self.nose)
 
             resize_frame = cv2.resize(self.debug_frame, (720, 720))
-            if camera:
-                cv2.imshow("Camera view", resize_frame)
-            # else:
-            #     aspect_ratio = self.frame.shape[1] / self.frame.shape[0]
-            #     cv2.imshow("Video view", cv2.resize(self.debug_frame, (int(900),  int(900 / aspect_ratio))))
+            cv2.imshow("AKARI view", resize_frame)
 
             meet_flag = False
 
             if cv2.waitKey(1) == ord('q'):
-                cv2.destroyAllWindows()
                 break
 
-        if not camera:
-            self.cap.release()
         cv2.destroyAllWindows()
-        for i in range(1, 5):  # https://stackoverflow.com/a/25794701/5494277
-            cv2.waitKey(1)
         self.running = False
 
 
@@ -545,15 +482,14 @@ def main() -> None:
     face_tracker = FaceTracker()
     direction_updater = DirectionUpdater()
 
-    t1 = threading.Thread(target=Recognition_run, args=(q_detection,), daemon=True)
-    t2 = threading.Thread(target=direction_updater._face_info_cb, args=(q_detection,), daemon=True)
-    t3 = threading.Thread(target=face_tracker._tracker, daemon=True)
-    t1.start()
-    t2.start()
-    t3.start()
-    t1.join()
-    t2.join()
-    t3.join()
+    threads = [
+        threading.Thread(target=Recognition_run, args=(q_detection,)),
+        threading.Thread(target=direction_updater._face_info_cb, args=(q_detection,), daemon=True),
+        threading.Thread(target=face_tracker._tracker, daemon=True)
+    ]
+    for thread in threads:
+        thread.start()
+        thread.join(timeout=1)
 
 
 if __name__ == "__main__":
